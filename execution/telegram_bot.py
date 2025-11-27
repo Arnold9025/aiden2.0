@@ -192,6 +192,36 @@ class EmailBot:
         
         await context.bot.send_message(chat_id=chat_id, text=f"Done! Sent {count} emails.")
 
+    async def debug_bot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        status_msg = "--- DEBUG STATUS ---\n"
+        
+        # Check OpenAI
+        import config
+        if config.OPENAI_API_KEY:
+            status_msg += "✅ OpenAI API Key found.\n"
+        else:
+            status_msg += "❌ OpenAI API Key MISSING.\n"
+            
+        # Check Google Credentials
+        import os
+        if os.path.exists(config.GOOGLE_CREDENTIALS_FILE):
+             status_msg += "✅ credentials.json found.\n"
+        else:
+             status_msg += "❌ credentials.json MISSING.\n"
+             
+        if os.path.exists(config.GOOGLE_TOKEN_FILE):
+             status_msg += "✅ token.json found.\n"
+        else:
+             status_msg += "❌ token.json MISSING.\n"
+             
+        # Check Google Service Creds
+        if self.google_service.creds and self.google_service.creds.valid:
+            status_msg += "✅ Google Credentials valid.\n"
+        else:
+            status_msg += "❌ Google Credentials invalid or not loaded.\n"
+            
+        await update.message.reply_text(status_msg)
+
 if __name__ == '__main__':
     bot = EmailBot()
     application = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
@@ -213,5 +243,6 @@ if __name__ == '__main__':
         fallbacks=[CommandHandler('start', bot.start)]
     )
     
+    application.add_handler(CommandHandler('debug', bot.debug_bot))
     application.add_handler(conv_handler)
     application.run_polling()
