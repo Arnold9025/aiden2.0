@@ -135,7 +135,9 @@ class GoogleService:
 
 class OpenAIService:
     def __init__(self):
-        openai.api_key = config.OPENAI_API_KEY
+        # Strip whitespace just in case
+        api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else None
+        self.client = openai.OpenAI(api_key=api_key)
 
     def generate_email(self, context, prospect_info, feedback=None, image_url=None):
         prompt = f"Context about the company:\n{context}\n\n"
@@ -160,7 +162,7 @@ class OpenAIService:
         """
 
         try:
-            response = openai.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a helpful sales assistant and expert email designer. You output ONLY raw HTML."},
@@ -190,4 +192,4 @@ class OpenAIService:
         except Exception as e:
             import traceback
             traceback.print_exc()
-            return f"Error generating email: {str(e)}"
+            return f"Error generating email ({type(e).__name__}): {str(e)}"
