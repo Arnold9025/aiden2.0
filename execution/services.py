@@ -135,8 +135,10 @@ class GoogleService:
 
 class OpenAIService:
     def __init__(self):
-        # Strip whitespace just in case
-        api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else None
+        # Strip whitespace and handle potential copy-paste errors (newlines)
+        raw_key = config.OPENAI_API_KEY or ""
+        api_key = raw_key.strip().split('\n')[0].split('\r')[0]
+        
         # Increase timeout to 60 seconds to avoid connection errors on slow networks
         self.client = openai.OpenAI(api_key=api_key, timeout=60.0)
 
