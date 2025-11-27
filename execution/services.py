@@ -188,5 +188,7 @@ class OpenAIService:
                 
             return content.strip()
         except Exception as e:
-            print(e)
-            return "Error generating email."
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return f"Error generating email: {str(e)}"
