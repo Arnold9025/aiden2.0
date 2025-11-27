@@ -1,5 +1,6 @@
-import os.path
-import pickle
+import os
+import json
+from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -20,18 +21,54 @@ SCOPES = [
 class GoogleService:
     def __init__(self):
         self.creds = None
-        if os.path.exists(config.GOOGLE_TOKEN_FILE):
-            with open(config.GOOGLE_TOKEN_FILE, 'rb') as token:
-                self.creds = pickle.load(token)
+        
+        # 1. Handle Client Secrets (credentials.json) from Env Var if file missing
+        if not os.path.exists(config.GOOGLE_CREDENTIALS_FILE):
+            creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+            if creds_json:
+                with open(config.GOOGLE_CREDENTIALS_FILE, "w") as f:
+                    f.write(creds_json)
+        
+        # 2. Try to load Token
+        # Priority: Env Var (JSON) -> File (JSON) -> File (Pickle - Legacy)
+        
+        token_json = os.getenv("GOOGLE_TOKEN_JSON")
+        if token_json:
+            try:
+                self.creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+            except Exception as e:
+                print(f"Error loading token from env: {e}")
+
+        if not self.creds and os.path.exists(config.GOOGLE_TOKEN_FILE):
+            try:
+                self.creds = Credentials.from_authorized_user_file(config.GOOGLE_TOKEN_FILE, SCOPES)
+            except Exception:
+                # Fallback to pickle for backward compatibility
+                try:
+                    import pickle
+                    with open(config.GOOGLE_TOKEN_FILE, 'rb') as token:
+                        self.creds = pickle.load(token)
+                except Exception as e:
+                    print(f"Error loading token file: {e}")
+
+        # 3. Refresh or Login
         if not self.creds or not self.creds.valid:
             if self.creds and self.creds.expired and self.creds.refresh_token:
-                self.creds.refresh(Request())
-            else:
+                try:
+                    self.creds.refresh(Request())
+                except Exception as e:
+                    print(f"Error refreshing token: {e}")
+                    self.creds = None # Force re-login
+            
+            if not self.creds:
+                # This will fail on server if no browser, but necessary for local setup
                 flow = InstalledAppFlow.from_client_secrets_file(
                     config.GOOGLE_CREDENTIALS_FILE, SCOPES)
                 self.creds = flow.run_local_server(port=0)
-            with open(config.GOOGLE_TOKEN_FILE, 'wb') as token:
-                pickle.dump(self.creds, token)
+            
+            # Save as JSON for future use (and easy copy-paste to env var)
+            with open(config.GOOGLE_TOKEN_FILE, 'w') as token:
+                token.write(self.creds.to_json())
 
         self.docs_service = build('docs', 'v1', credentials=self.creds)
         self.sheets_service = build('sheets', 'v4', credentials=self.creds)
