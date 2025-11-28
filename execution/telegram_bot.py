@@ -13,8 +13,9 @@ logging.basicConfig(
 WAITING_FOR_SHEET_SELECTION = 1
 WAITING_FOR_COLUMN_SELECTION = 2
 WAITING_FOR_PROMPT = 3
-WAITING_FOR_IMAGE = 4
-WAITING_FOR_FEEDBACK = 5
+WAITING_FOR_LOGO = 4
+WAITING_FOR_IMAGE = 5
+WAITING_FOR_FEEDBACK = 6
 
 class EmailBot:
     def __init__(self):
@@ -26,6 +27,7 @@ class EmailBot:
         self.current_draft = ""
         self.user_prompt = ""
         self.image_url = None
+        self.logo_url = None
         self.selected_sheet = None
         self.selected_columns = []
         self.available_headers = []
@@ -58,7 +60,17 @@ class EmailBot:
 
     async def handle_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.user_prompt = update.message.text
-        await update.message.reply_text("Do you want to insert an image? (Reply with the Image URL or type 'no')")
+        await update.message.reply_text("Do you want to add a logo? (Reply with the Logo URL or type 'no')")
+        return WAITING_FOR_LOGO
+
+    async def handle_logo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        text = update.message.text
+        if text.lower() == 'no':
+            self.logo_url = None
+        else:
+            self.logo_url = text
+            
+        await update.message.reply_text("Do you want to insert a header image? (Reply with the Image URL or type 'no')")
         return WAITING_FOR_IMAGE
 
     async def handle_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,6 +105,7 @@ class EmailBot:
             dummy_prospect, 
             self.user_prompt,
             image_url=self.image_url,
+            logo_url=self.logo_url,
             available_columns=self.selected_columns
         )
         
@@ -319,6 +332,7 @@ if __name__ == '__main__':
             WAITING_FOR_SHEET_SELECTION: [CallbackQueryHandler(bot.handle_sheet_selection)],
             WAITING_FOR_COLUMN_SELECTION: [CallbackQueryHandler(bot.handle_column_selection)],
             WAITING_FOR_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_prompt)],
+            WAITING_FOR_LOGO: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_logo)],
             WAITING_FOR_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_image)],
             WAITING_FOR_FEEDBACK: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_feedback),

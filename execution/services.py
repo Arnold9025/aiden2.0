@@ -156,7 +156,7 @@ class OpenAIService:
         # Increase timeout to 60 seconds to avoid connection errors on slow networks
         self.client = openai.OpenAI(api_key=api_key, timeout=60.0)
 
-    def generate_email(self, context, prospect_info, feedback=None, image_url=None, available_columns=None):
+    def generate_email(self, context, prospect_info, feedback=None, image_url=None, logo_url=None, available_columns=None):
         prompt = f"Context about the company:\n{context}\n\n"
         prompt += f"Prospect Info: {prospect_info}\n"
         if available_columns:
@@ -166,16 +166,23 @@ class OpenAIService:
             prompt += f"Previous feedback from user: {feedback}\n\n"
         
         image_instruction = ""
+        if logo_url:
+            image_instruction += f"- Include this LOGO at the very top of the email (centered, small, e.g. 150px width): <img src='{logo_url}' alt='Logo' style='width:150px; height:auto; display:block; margin: 0 auto 20px auto;' />\n"
+        
         if image_url:
-            image_instruction = f"- Include this image at the top of the email (header): <img src='{image_url}' alt='Header Image' style='width:100%; max-width:600px; height:auto; display:block; margin: 0 auto;' />"
+            image_instruction += f"- Include this HEADER IMAGE after the logo (full width): <img src='{image_url}' alt='Header Image' style='width:100%; max-width:600px; height:auto; display:block; margin: 0 auto;' />\n"
 
         prompt += f"""
-        Draft a premium, modern, newspaper-style email to this prospect.
+        Draft a premium email to this prospect.
         Use HTML and inline CSS.
         {image_instruction}
-        - Use a clean, serif font (like Merriweather or Georgia) for headings to give a newspaper feel.
-        - Use a sans-serif font (like Arial or Helvetica) for body text.
-        - Use a subtle background color (like #f4f4f4) for the outer container and white for the content box.
+        
+        CRITICAL STYLE INSTRUCTIONS:
+        1. Analyze the 'Context about the company' provided above. Look for any specific branding, tone, style, or formatting guidelines mentioned there.
+        2. STRICTLY ADHERE to those style instructions.
+        3. If the context does NOT specify a style, use a clean, professional, and modern design with a subtle background color and a white content box.
+        4. Do NOT force a "newspaper" style unless the context explicitly asks for it.
+        
         - Add a professional header and footer.
         - Make it responsive.
         - IMPORTANT: Return ONLY the raw HTML code. Do not include any conversational text like "Here is the email" or markdown formatting. Start directly with <!DOCTYPE html> or <html>.
