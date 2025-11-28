@@ -108,6 +108,20 @@ class GoogleService:
             print(err)
             return []
 
+    def get_sheet_headers(self, spreadsheet_id, sheet_name):
+        try:
+            # Read just the first row to get headers
+            range_name = f"{sheet_name}!A1:Z1"
+            result = self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id, range=range_name).execute()
+            values = result.get('values', [])
+            if values:
+                return values[0] # Return the first row as a list of headers
+            return []
+        except HttpError as err:
+            print(err)
+            return []
+
     def send_email(self, to, subject, body_html):
         try:
             message = MIMEMultipart('alternative')
@@ -142,9 +156,12 @@ class OpenAIService:
         # Increase timeout to 60 seconds to avoid connection errors on slow networks
         self.client = openai.OpenAI(api_key=api_key, timeout=60.0)
 
-    def generate_email(self, context, prospect_info, feedback=None, image_url=None):
+    def generate_email(self, context, prospect_info, feedback=None, image_url=None, available_columns=None):
         prompt = f"Context about the company:\n{context}\n\n"
-        prompt += f"Prospect Info: {prospect_info}\n\n"
+        prompt += f"Prospect Info: {prospect_info}\n"
+        if available_columns:
+            prompt += f"Available Placeholders: {', '.join([f'[{col}]' for col in available_columns])}\n"
+        prompt += "\n"
         if feedback:
             prompt += f"Previous feedback from user: {feedback}\n\n"
         

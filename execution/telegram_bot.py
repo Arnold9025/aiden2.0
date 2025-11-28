@@ -10,10 +10,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-WAITING_FOR_PROMPT = 1
-WAITING_FOR_IMAGE = 2
-WAITING_FOR_FEEDBACK = 3
-WAITING_FOR_SHEET_NAME = 4
+WAITING_FOR_SHEET_SELECTION = 1
+WAITING_FOR_COLUMN_SELECTION = 2
+WAITING_FOR_PROMPT = 3
+WAITING_FOR_IMAGE = 4
+WAITING_FOR_FEEDBACK = 5
 
 class EmailBot:
     def __init__(self):
@@ -25,6 +26,9 @@ class EmailBot:
         self.current_draft = ""
         self.user_prompt = ""
         self.image_url = None
+        self.selected_sheet = None
+        self.selected_columns = []
+        self.available_headers = []
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Hello! I'm ready to help you send emails.\n\nFirst, I'll read the context from your Google Doc...")
@@ -36,8 +40,21 @@ class EmailBot:
         else:
             await update.message.reply_text("Context loaded.")
 
-        await update.message.reply_text("Please tell me what kind of email you want to send to your prospects.")
-        return WAITING_FOR_PROMPT
+        # Get sheet names
+        sheet_names = self.google_service.get_sheet_names(config.GOOGLE_SHEET_ID)
+        
+        if not sheet_names:
+            await update.message.reply_text("Error: Could not list sheets. Please check your configuration.")
+            return ConversationHandler.END
+        
+        # Create buttons for each sheet
+        keyboard = []
+        for name in sheet_names:
+            keyboard.append([InlineKeyboardButton(name, callback_data=f"sheet|{name}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("Please select the sheet containing your prospects:", reply_markup=reply_markup)
+        return WAITING_FOR_SHEET_SELECTION
 
     async def handle_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.user_prompt = update.message.text
@@ -75,7 +92,8 @@ class EmailBot:
             self.context_doc, 
             dummy_prospect, 
             self.user_prompt,
-            image_url=self.image_url
+            image_url=self.image_url,
+            available_columns=self.selected_columns
         )
         
         # Create text preview
@@ -102,22 +120,9 @@ class EmailBot:
         await query.answer()
         
         if query.data == 'approve':
-            # Get sheet names
-            sheet_names = self.google_service.get_sheet_names(config.GOOGLE_SHEET_ID)
-            
-            if not sheet_names:
-                await query.edit_message_text(text="Approved! But I couldn't list the sheets. Please reply with the exact sheet name manually.")
-            else:
-                # Create buttons for each sheet
-                keyboard = []
-                for name in sheet_names:
-                    # Use a prefix to identify sheet selection
-                    keyboard.append([InlineKeyboardButton(name, callback_data=f"sheet|{name}")])
-                
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(text="Approved! Please select the sheet to use:", reply_markup=reply_markup)
-            
-            return WAITING_FOR_SHEET_NAME
+            await query.edit_message_text(text="Approved! Sending emails...")
+            await self.process_sending(update, context)
+            return ConversationHandler.END
             
         elif query.data == 'refine':
             await query.edit_message_text(text="Okay, please type your feedback.")
@@ -129,52 +134,127 @@ class EmailBot:
         
         data = query.data
         if data.startswith("sheet|"):
-            sheet_name = data.split("|")[1]
-            await query.edit_message_text(text=f"Selected '{sheet_name}'. Reading prospects...")
-            await self.process_sheet_processing(update, context, sheet_name)
-            return ConversationHandler.END
+            self.selected_sheet = data.split("|")[1]
+            
+            # Fetch headers
+            self.available_headers = self.google_service.get_sheet_headers(config.GOOGLE_SHEET_ID, self.selected_sheet)
+            
+            if not self.available_headers:
+                await query.edit_message_text(text=f"Selected '{self.selected_sheet}', but found no headers (first row is empty).")
+                return ConversationHandler.END
+                
+            self.selected_columns = [] # Reset selection
+            await self.show_column_selection(query, context)
+            return WAITING_FOR_COLUMN_SELECTION
 
-    async def handle_sheet_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        sheet_name = update.message.text.strip()
-        await update.message.reply_text(f"Reading prospects from '{sheet_name}'...")
-        await self.process_sheet_processing(update, context, sheet_name)
-        return ConversationHandler.END
+    async def show_column_selection(self, query, context):
+        keyboard = []
+        # Add buttons for each header
+        for header in self.available_headers:
+            # Mark selected columns
+            label = f"✅ {header}" if header in self.selected_columns else header
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"col|{header}")])
+        
+        # Add Done button
+        keyboard.append([InlineKeyboardButton("Done Selecting", callback_data="done_cols")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        msg_text = f"Sheet: {self.selected_sheet}\n\nPlease select the columns you want to use for personalization (e.g., Name, Company, Email).\nClick a column to toggle it."
+        
+        # If we are updating an existing message
+        try:
+            await query.edit_message_text(text=msg_text, reply_markup=reply_markup)
+        except Exception:
+            # Fallback if message content hasn't changed but markup has, or other issues
+            await query.message.reply_text(text=msg_text, reply_markup=reply_markup)
 
-    async def process_sheet_processing(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sheet_name: str):
-        # Read Sheet (A:C)
-        range_name = f"{sheet_name}!A:C"
+    async def handle_column_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        
+        if data == "done_cols":
+            if not self.selected_columns:
+                await query.answer("Please select at least one column!", show_alert=True)
+                return WAITING_FOR_COLUMN_SELECTION
+            
+            cols_str = ", ".join(self.selected_columns)
+            await query.edit_message_text(text=f"Selected columns: {cols_str}\n\nNow, please tell me what kind of email you want to send to your prospects.")
+            return WAITING_FOR_PROMPT
+            
+        if data.startswith("col|"):
+            col_name = data.split("|")[1]
+            if col_name in self.selected_columns:
+                self.selected_columns.remove(col_name)
+            else:
+                self.selected_columns.append(col_name)
+            
+            await self.show_column_selection(query, context)
+            return WAITING_FOR_COLUMN_SELECTION
+
+    async def process_sending(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        sheet_name = self.selected_sheet
+        # Read Sheet (A:Z) - assuming max 26 columns for now, or just read all
+        range_name = f"{sheet_name}!A:Z"
         all_rows = self.google_service.read_sheet(config.GOOGLE_SHEET_ID, range_name)
         
-        # Determine chat_id based on update type (message or callback)
         chat_id = update.effective_chat.id
         
         if not all_rows:
-            await context.bot.send_message(chat_id=chat_id, text=f"Error: Could not read data from '{sheet_name}'. Please check the name and try again.")
+            await context.bot.send_message(chat_id=chat_id, text=f"Error: Could not read data from '{sheet_name}'.")
             return
         
+        headers = all_rows[0]
+        # Map header name to index
+        header_map = {h.strip(): i for i, h in enumerate(headers)}
+        
+        # Find email column index
+        email_col_index = -1
+        for col in self.selected_columns:
+            if "email" in col.lower():
+                email_col_index = header_map.get(col)
+                break
+        
+        # Fallback: look for 'email' in any header if not explicitly selected (though it should be)
+        if email_col_index == -1:
+             for h, i in header_map.items():
+                 if "email" in h.lower():
+                     email_col_index = i
+                     break
+        
+        if email_col_index == -1:
+            await context.bot.send_message(chat_id=chat_id, text="Error: Could not identify an 'Email' column. Please make sure one of the columns is named 'Email'.")
+            return
+
         self.prospects = []
         skipped_count = 0
-        for row in all_rows:
-            # We expect at least 3 columns: Nom, Prenom, Email
-            if len(row) >= 3:
-                last_name = row[0].strip()
-                first_name = row[1].strip()
-                email = row[2].strip()
-                
+        
+        # Start from row 1 (skip headers)
+        for row in all_rows[1:]:
+            if not row: continue
+            
+            # Get email
+            if len(row) > email_col_index:
+                email = row[email_col_index].strip()
                 if "@" not in email:
                     skipped_count += 1
                     continue
-                    
-                full_name = f"{first_name} {last_name}"
-                self.prospects.append({"name": full_name, "email": email})
+                
+                # Build prospect dict for replacements
+                prospect_data = {"email": email}
+                for col_name in self.selected_columns:
+                    idx = header_map.get(col_name)
+                    if idx is not None and len(row) > idx:
+                        prospect_data[col_name] = row[idx].strip()
+                    else:
+                        prospect_data[col_name] = "" # Empty if missing
+                
+                self.prospects.append(prospect_data)
             else:
                 skipped_count += 1
         
-        if skipped_count > 0:
-                await context.bot.send_message(chat_id=chat_id, text=f"Skipped {skipped_count} rows with invalid emails (likely headers).")
-        
         if not self.prospects:
-            await context.bot.send_message(chat_id=chat_id, text="Error: No valid prospects found in the sheet.")
+            await context.bot.send_message(chat_id=chat_id, text="Error: No valid prospects found.")
             return
         
         await context.bot.send_message(chat_id=chat_id, text=f"Found {len(self.prospects)} prospects. Sending emails...")
@@ -182,7 +262,14 @@ class EmailBot:
         count = 0
         for prospect in self.prospects:
             # Personalize the email
-            final_email = self.current_draft.replace("[Prospect Name]", prospect['name'])
+            final_email = self.current_draft
+            for col_name, value in prospect.items():
+                # Replace [Column Name] with value
+                # Case insensitive replacement would be better but let's stick to exact match for now based on selection
+                final_email = final_email.replace(f"[{col_name}]", value)
+            
+            # Also try standard [Prospect Name] if 'Name' or 'Nom' was selected
+            # This is a fallback/helper if the prompt used generic placeholders
             
             success, error_msg = self.google_service.send_email(prospect['email'], "Information", final_email)
             if success:
@@ -229,15 +316,13 @@ if __name__ == '__main__':
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', bot.start)],
         states={
+            WAITING_FOR_SHEET_SELECTION: [CallbackQueryHandler(bot.handle_sheet_selection)],
+            WAITING_FOR_COLUMN_SELECTION: [CallbackQueryHandler(bot.handle_column_selection)],
             WAITING_FOR_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_prompt)],
             WAITING_FOR_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_image)],
             WAITING_FOR_FEEDBACK: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_feedback),
                 CallbackQueryHandler(bot.button_handler)
-            ],
-            WAITING_FOR_SHEET_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_sheet_name),
-                CallbackQueryHandler(bot.handle_sheet_selection)
             ]
         },
         fallbacks=[CommandHandler('start', bot.start)]
