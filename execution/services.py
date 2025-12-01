@@ -190,7 +190,7 @@ class OpenAIService:
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-5.1",
                 messages=[
                     {"role": "system", "content": "You are a helpful sales assistant and expert email designer. You output ONLY raw HTML."},
                     {"role": "user", "content": prompt}
