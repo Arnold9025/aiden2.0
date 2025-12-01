@@ -13,9 +13,10 @@ logging.basicConfig(
 WAITING_FOR_SHEET_SELECTION = 1
 WAITING_FOR_COLUMN_SELECTION = 2
 WAITING_FOR_PROMPT = 3
-WAITING_FOR_LOGO = 4
-WAITING_FOR_IMAGE = 5
-WAITING_FOR_FEEDBACK = 6
+WAITING_FOR_SUBJECT = 4
+WAITING_FOR_LOGO = 5
+WAITING_FOR_IMAGE = 6
+WAITING_FOR_FEEDBACK = 7
 
 class EmailBot:
     def __init__(self):
@@ -26,6 +27,7 @@ class EmailBot:
         self.current_prospect_index = 0
         self.current_draft = ""
         self.user_prompt = ""
+        self.email_subject = ""
         self.image_url = None
         self.logo_url = None
         self.selected_sheet = None
@@ -60,6 +62,11 @@ class EmailBot:
 
     async def handle_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.user_prompt = update.message.text
+        await update.message.reply_text("What should be the **Subject** of the email?")
+        return WAITING_FOR_SUBJECT
+
+    async def handle_subject(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.email_subject = update.message.text
         await update.message.reply_text("Do you want to add a logo? (Reply with the Logo URL or type 'no')")
         return WAITING_FOR_LOGO
 
@@ -124,7 +131,7 @@ class EmailBot:
             [InlineKeyboardButton("Refine", callback_data='refine')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(f"--- DRAFT PREVIEW (Text only) ---\n\n{preview_text}\n\n------------\n\nIf this looks good, click 'Approve & Send to All'.\nOtherwise, type your feedback to refine it.", reply_markup=reply_markup)
+        await update.message.reply_text(f"--- DRAFT PREVIEW (Text only) ---\nSubject: {self.email_subject}\n\n{preview_text}\n\n------------\n\nIf this looks good, click 'Approve & Send to All'.\nOtherwise, type your feedback to refine it.", reply_markup=reply_markup)
 
 
 
@@ -284,7 +291,7 @@ class EmailBot:
             # Also try standard [Prospect Name] if 'Name' or 'Nom' was selected
             # This is a fallback/helper if the prompt used generic placeholders
             
-            success, error_msg = self.google_service.send_email(prospect['email'], "Information", final_email)
+            success, error_msg = self.google_service.send_email(prospect['email'], self.email_subject, final_email)
             if success:
                 count += 1
             else:
@@ -332,6 +339,7 @@ if __name__ == '__main__':
             WAITING_FOR_SHEET_SELECTION: [CallbackQueryHandler(bot.handle_sheet_selection)],
             WAITING_FOR_COLUMN_SELECTION: [CallbackQueryHandler(bot.handle_column_selection)],
             WAITING_FOR_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_prompt)],
+            WAITING_FOR_SUBJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_subject)],
             WAITING_FOR_LOGO: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_logo)],
             WAITING_FOR_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_image)],
             WAITING_FOR_FEEDBACK: [
